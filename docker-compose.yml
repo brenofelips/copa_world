@@ -196,6 +196,20 @@ services:
       postgres:
         condition: service_healthy
 
+  # ─── Data Provider (API-Football → Ingestion API) ────────────────────────────
+
+  data-provider:
+    build: ./services/data-provider
+    environment:
+      API_FOOTBALL_KEY: ${API_FOOTBALL_KEY}
+      INGESTION_URL: http://nginx/events
+      REDIS_ADDR: redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+      nginx:
+        condition: service_started
+
   # ─── Frontend (Next.js) ────────────────────────────────────────────────────────
 
   frontend:
