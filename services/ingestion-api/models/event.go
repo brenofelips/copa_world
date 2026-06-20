@@ -22,6 +22,8 @@ type ProviderEvent struct {
 	Match       string                 `json:"match"`
 	TeamA       string                 `json:"team_A"`
 	TeamB       string                 `json:"team_B"`
+	TeamALogo   string                 `json:"team_a_logo"`
+	TeamBLogo   string                 `json:"team_b_logo"`
 	Competition Competition            `json:"competition"`
 	Event       EventType              `json:"event"`
 	Minute      int                    `json:"minute"`
@@ -43,6 +45,8 @@ type NormalizedEvent struct {
 	TeamB            string                 `json:"team_b"`
 	TeamACode        string                 `json:"team_a_code"`
 	TeamBCode        string                 `json:"team_b_code"`
+	TeamALogo        string                 `json:"team_a_logo"`
+	TeamBLogo        string                 `json:"team_b_logo"`
 	CompetitionTitle string                 `json:"competition_title"`
 	CompetitionStage string                 `json:"competition_stage"`
 	EventType        EventType              `json:"event_type"`

@@ -48,6 +48,9 @@ func main() {
 		return c.JSON(fiber.Map{"status": "ok", "service": "web-server"})
 	})
 
+	// Live matches list (reads Redis)
+	app.Get("/matches", matchH.ListMatches)
+
 	// Live match state (reads Redis)
 	app.Get("/matches/:match_id", matchH.GetMatch)
 

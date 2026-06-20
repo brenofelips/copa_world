@@ -152,10 +152,12 @@ func (p *Poller) handleStatusTransition(ctx context.Context, fixture apifootball
 
 func (p *Poller) postStatusEvent(ctx context.Context, fixture apifootball.FixtureData, matchID, eventType string, minute int, eventID string) error {
 	ev := providerEvent{
-		ID:    eventID,
-		Match: matchID,
-		TeamA: fixture.Teams.Home.Name,
-		TeamB: fixture.Teams.Away.Name,
+		ID:        eventID,
+		Match:     matchID,
+		TeamA:     fixture.Teams.Home.Name,
+		TeamB:     fixture.Teams.Away.Name,
+		TeamALogo: fixture.Teams.Home.Logo,
+		TeamBLogo: fixture.Teams.Away.Logo,
 		Competition: competition{
 			Title: "world-cup-2026",
 			Stage: normalizeRound(fixture.League.Round),
@@ -175,10 +177,12 @@ func (p *Poller) processGameEvent(ctx context.Context, fixture apifootball.Fixtu
 	}
 
 	ev := providerEvent{
-		ID:    fmt.Sprintf("%d-%d", fixture.Fixture.ID, index),
-		Match: matchID,
-		TeamA: fixture.Teams.Home.Name,
-		TeamB: fixture.Teams.Away.Name,
+		ID:        fmt.Sprintf("%d-%d", fixture.Fixture.ID, index),
+		Match:     matchID,
+		TeamA:     fixture.Teams.Home.Name,
+		TeamB:     fixture.Teams.Away.Name,
+		TeamALogo: fixture.Teams.Home.Logo,
+		TeamBLogo: fixture.Teams.Away.Logo,
 		Competition: competition{
 			Title: "world-cup-2026",
 			Stage: normalizeRound(fixture.League.Round),
@@ -222,6 +226,8 @@ type providerEvent struct {
 	Match       string                 `json:"match"`
 	TeamA       string                 `json:"team_A"`
 	TeamB       string                 `json:"team_B"`
+	TeamALogo   string                 `json:"team_a_logo"`
+	TeamBLogo   string                 `json:"team_b_logo"`
 	Competition competition            `json:"competition"`
 	Event       string                 `json:"event"`
 	Minute      int                    `json:"minute"`

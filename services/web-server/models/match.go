@@ -9,6 +9,8 @@ type MatchState struct {
 	TeamBCode        string    `json:"team_b_code"`
 	TeamA            string    `json:"team_a"`
 	TeamB            string    `json:"team_b"`
+	TeamALogo        string    `json:"team_a_logo"`
+	TeamBLogo        string    `json:"team_b_logo"`
 	ScoreA           int       `json:"score_a"`
 	ScoreB           int       `json:"score_b"`
 	Status           string    `json:"status"`

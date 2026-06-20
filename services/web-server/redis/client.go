@@ -22,6 +22,46 @@ func NewClient(addr string) *Client {
 	return &Client{rdb: rdb}
 }
 
+func (c *Client) GetLiveMatches(ctx context.Context) ([]*models.MatchState, error) {
+	var cursor uint64
+	var keys []string
+	for {
+		batch, next, err := c.rdb.Scan(ctx, cursor, "match:*", 100).Result()
+		if err != nil {
+			return nil, fmt.Errorf("redis scan: %w", err)
+		}
+		keys = append(keys, batch...)
+		cursor = next
+		if cursor == 0 {
+			break
+		}
+	}
+	if len(keys) == 0 {
+		return []*models.MatchState{}, nil
+	}
+	pipe := c.rdb.Pipeline()
+	cmds := make([]*redis.StringCmd, len(keys))
+	for i, key := range keys {
+		cmds[i] = pipe.Get(ctx, key)
+	}
+	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+		return nil, fmt.Errorf("redis pipeline: %w", err)
+	}
+	var matches []*models.MatchState
+	for _, cmd := range cmds {
+		data, err := cmd.Bytes()
+		if err != nil {
+			continue
+		}
+		var state models.MatchState
+		if err := json.Unmarshal(data, &state); err != nil {
+			continue
+		}
+		matches = append(matches, &state)
+	}
+	return matches, nil
+}
+
 func (c *Client) GetMatchState(ctx context.Context, matchID string) (*models.MatchState, error) {
 	key := fmt.Sprintf("match:%s", matchID)
 	data, err := c.rdb.Get(ctx, key).Bytes()

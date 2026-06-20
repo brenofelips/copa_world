@@ -88,6 +88,8 @@ func (c *Consumer) process(ctx context.Context, event *models.NormalizedEvent) e
 		state.TeamBCode = event.TeamBCode
 		state.TeamA = event.TeamA
 		state.TeamB = event.TeamB
+		state.TeamALogo = event.TeamALogo
+		state.TeamBLogo = event.TeamBLogo
 
 	case models.Goal:
 		teamID, _ := event.Payload["team_id"].(string)

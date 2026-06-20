@@ -15,6 +15,16 @@ func NewMatchHandler(rdb *redis.Client, store *db.Store) *MatchHandler {
 	return &MatchHandler{rdb: rdb, store: store}
 }
 
+// GET /matches
+// Returns all matches currently stored in Redis (LIVE and recently ENDED).
+func (h *MatchHandler) ListMatches(c *fiber.Ctx) error {
+	matches, err := h.rdb.GetLiveMatches(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+	return c.JSON(matches)
+}
+
 // GET /matches/:match_id
 // Reads live state from Redis; falls back to PostgreSQL for finished matches.
 func (h *MatchHandler) GetMatch(c *fiber.Ctx) error {

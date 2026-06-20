@@ -11,6 +11,8 @@ interface MatchState {
   team_b: string
   team_a_code: string
   team_b_code: string
+  team_a_logo: string
+  team_b_logo: string
   score_a: number
   score_b: number
   status: string
@@ -33,9 +35,6 @@ const EVENT_EMOJI: Record<string, string> = {
   MATCH_ENDED: '🏁',
 }
 
-const FLAG: Record<string, string> = {
-  BRA: '🇧🇷', MAR: '🇲🇦', GER: '🇩🇪', CUR: '🇨🇼', ARG: '🇦🇷', POL: '🇵🇱',
-}
 
 function StatusBadge({ status }: { status: string }) {
   if (status === 'LIVE') return <Badge variant="live" className="gap-1.5"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />LIVE</Badge>
@@ -124,7 +123,9 @@ export default function LiveMatch({ matchId }: { matchId: string }) {
           <div className="flex items-center justify-center gap-6">
             {/* Team A */}
             <div className="flex flex-1 flex-col items-end gap-1">
-              <span className="text-2xl">{FLAG[state.team_a_code] ?? '🏳️'}</span>
+              {state.team_a_logo && (
+                <img src={state.team_a_logo} alt={state.team_a} className="h-10 w-10 object-contain" />
+              )}
               <span className="text-lg font-bold leading-tight text-foreground">{state.team_a}</span>
               <span className="text-xs text-muted-foreground">{state.team_a_code}</span>
             </div>
@@ -146,7 +147,9 @@ export default function LiveMatch({ matchId }: { matchId: string }) {
 
             {/* Team B */}
             <div className="flex flex-1 flex-col items-start gap-1">
-              <span className="text-2xl">{FLAG[state.team_b_code] ?? '🏳️'}</span>
+              {state.team_b_logo && (
+                <img src={state.team_b_logo} alt={state.team_b} className="h-10 w-10 object-contain" />
+              )}
               <span className="text-lg font-bold leading-tight text-foreground">{state.team_b}</span>
               <span className="text-xs text-muted-foreground">{state.team_b_code}</span>
             </div>

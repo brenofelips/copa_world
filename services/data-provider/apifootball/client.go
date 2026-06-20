@@ -98,6 +98,7 @@ type TeamsInfo struct {
 type TeamInfo struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+	Logo string `json:"logo"`
 }
 
 type GoalsInfo struct {

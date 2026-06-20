@@ -42,6 +42,8 @@ func (h *EventHandler) HandleEvent(c *fiber.Ctx) error {
 		TeamB:            ev.TeamB,
 		TeamACode:        teamACode,
 		TeamBCode:        teamBCode,
+		TeamALogo:        ev.TeamALogo,
+		TeamBLogo:        ev.TeamBLogo,
 		CompetitionTitle: ev.Competition.Title,
 		CompetitionStage: ev.Competition.Stage,
 		EventType:        ev.Event,
