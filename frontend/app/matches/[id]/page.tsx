@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import LiveMatch from '@/components/LiveMatch'
+import { Button } from '@/components/ui/button'
 
 interface Props {
   params: { id: string }
@@ -9,33 +10,35 @@ export default function MatchPage({ params }: Props) {
   const matchId = decodeURIComponent(params.id)
 
   return (
-    <main className="container">
-      <div style={{ marginBottom: 20 }}>
-        <Link href="/" style={{ color: '#888', fontSize: '0.9rem' }}>
-          ← Back to matches
+    <div className="space-y-6">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2">
+        <Link href="/">
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-muted-foreground hover:text-foreground">
+            ← Partidas
+          </Button>
         </Link>
+        <span className="text-muted-foreground/40">/</span>
+        <span className="text-sm text-muted-foreground truncate max-w-[200px] sm:max-w-none">
+          {matchId}
+        </span>
       </div>
-      <h1 style={{ fontSize: '1.2rem', marginBottom: 24, color: '#888' }}>
-        Match: <span style={{ color: '#fff' }}>{matchId}</span>
-      </h1>
+
+      {/* Live component */}
       <LiveMatch matchId={matchId} />
-      <div style={{ marginTop: 32, display: 'flex', gap: 12 }}>
+
+      {/* Stats link */}
+      <div>
         <a
           href={`${process.env.NEXT_PUBLIC_WEB_SERVER_URL || 'http://localhost:8080'}/matches/${matchId}/statistic`}
           target="_blank"
           rel="noreferrer"
-          style={{
-            background: '#1a1a2e',
-            border: '1px solid #333',
-            borderRadius: 6,
-            padding: '8px 16px',
-            fontSize: '0.85rem',
-            color: '#ccc',
-          }}
         >
-          View Statistics (JSON)
+          <Button variant="outline" size="sm" className="gap-2 text-muted-foreground">
+            Ver estatísticas (JSON) ↗
+          </Button>
         </a>
       </div>
-    </main>
+    </div>
   )
 }
