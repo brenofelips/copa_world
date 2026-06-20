@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -21,34 +22,149 @@ var terminalStatuses = map[string]bool{
 }
 
 type Poller struct {
-	api          *apifootball.Client
-	rdb          *dataredis.Client
-	ingestionURL string
-	interval     time.Duration
-	httpClient   *http.Client
+	api              *apifootball.Client
+	rdb              *dataredis.Client
+	ingestionURL     string
+	interval         time.Duration
+	scheduleInterval time.Duration
+	season           int
+	httpClient       *http.Client
 }
 
-func New(api *apifootball.Client, rdb *dataredis.Client, ingestionURL string, interval time.Duration) *Poller {
+func New(api *apifootball.Client, rdb *dataredis.Client, ingestionURL string, interval time.Duration, scheduleInterval time.Duration, season int) *Poller {
 	return &Poller{
-		api:          api,
-		rdb:          rdb,
-		ingestionURL: ingestionURL,
-		interval:     interval,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		api:              api,
+		rdb:              rdb,
+		ingestionURL:     ingestionURL,
+		interval:         interval,
+		scheduleInterval: scheduleInterval,
+		season:           season,
+		httpClient:       &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
+func (p *Poller) competitionTitle() string {
+	return fmt.Sprintf("world-cup-%d", p.season)
+}
+
 func (p *Poller) Run(ctx context.Context) {
-	log.Printf("Poller running, interval=%s, ingestion_url=%s", p.interval, p.ingestionURL)
+	log.Printf("Poller running, interval=%s, schedule_interval=%s, ingestion_url=%s",
+		p.interval, p.scheduleInterval, p.ingestionURL)
+
+	// Fetch full day schedule on startup, then poll live games.
+	p.pollSchedule(ctx)
 	p.poll(ctx)
-	ticker := time.NewTicker(p.interval)
-	defer ticker.Stop()
+
+	liveTicker := time.NewTicker(p.interval)
+	scheduleTicker := time.NewTicker(p.scheduleInterval)
+	defer liveTicker.Stop()
+	defer scheduleTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-liveTicker.C:
 			p.poll(ctx)
+		case <-scheduleTicker.C:
+			p.pollSchedule(ctx)
+		}
+	}
+}
+
+// pollSchedule fetches all of today's fixtures and sends SCHEDULED events for
+// upcoming games and MATCH_ENDED (with final score) for games we missed entirely.
+// Requires a paid API plan; on free plans it logs a warning and returns early.
+func (p *Poller) pollSchedule(ctx context.Context) {
+	today := time.Now().UTC().Format("2006-01-02")
+	fixtures, err := p.api.GetFixturesByDate(ctx, today)
+	if err != nil {
+		if errors.Is(err, apifootball.ErrAPIRestricted) {
+			log.Printf("poller: schedule poll skipped — upgrade API plan to enable schedule fetching (live polling still active)")
+			return
+		}
+		log.Printf("poller: fetch schedule error: %v", err)
+		return
+	}
+	log.Printf("poller: %d fixture(s) in today's schedule", len(fixtures))
+
+	for _, f := range fixtures {
+		status := f.Fixture.Status.Short
+		fixtureID := f.Fixture.ID
+		matchID := buildMatchID(f)
+
+		prevStatus, err := p.rdb.GetStatus(ctx, fixtureID)
+		if err != nil {
+			log.Printf("poller: schedule: get status fixture %d: %v", fixtureID, err)
+			continue
+		}
+
+		// Already handled as a terminal state — skip.
+		if terminalStatuses[prevStatus] {
+			continue
+		}
+
+		switch {
+		case status == "NS" || status == "TBD":
+			// Send SCHEDULED once, unless we already recorded it.
+			if prevStatus != "NS" && prevStatus != "TBD" {
+				if err := p.postStatusEvent(ctx, f, matchID, "SCHEDULED", 0,
+					fmt.Sprintf("%d-SCHEDULED", fixtureID)); err != nil {
+					log.Printf("poller: schedule: post scheduled fixture %d: %v", fixtureID, err)
+					continue
+				}
+				_ = p.rdb.SetStatus(ctx, fixtureID, "NS")
+			}
+
+		case terminalStatuses[status]:
+			// Game is finished but we either never saw it or tracked it live.
+			if prevStatus == "" || prevStatus == "NS" || prevStatus == "TBD" {
+				// Missed the entire game — synthesize MATCH_STARTED + MATCH_ENDED with score.
+				_ = p.postStatusEvent(ctx, f, matchID, "MATCH_STARTED", 0,
+					fmt.Sprintf("%d-MATCH_STARTED", fixtureID))
+
+				scoreA := 0
+				if f.Goals.Home != nil {
+					scoreA = *f.Goals.Home
+				}
+				scoreB := 0
+				if f.Goals.Away != nil {
+					scoreB = *f.Goals.Away
+				}
+				ev := providerEvent{
+					ID:        fmt.Sprintf("%d-MATCH_ENDED", fixtureID),
+					Match:     matchID,
+					TeamA:     f.Teams.Home.Name,
+					TeamB:     f.Teams.Away.Name,
+					TeamALogo: f.Teams.Home.Logo,
+					TeamBLogo: f.Teams.Away.Logo,
+					Competition: competition{
+						Title: p.competitionTitle(),
+						Stage: normalizeRound(f.League.Round),
+					},
+					Event:    "MATCH_ENDED",
+					Minute:   f.Fixture.Status.Elapsed,
+					Sequence: 0,
+					Payload: map[string]interface{}{
+						"final_score_a": scoreA,
+						"final_score_b": scoreB,
+					},
+				}
+				if err := p.postEvent(ctx, ev); err != nil {
+					log.Printf("poller: schedule: post ended fixture %d: %v", fixtureID, err)
+					continue
+				}
+				_ = p.rdb.SetStatus(ctx, fixtureID, status)
+
+			} else if !terminalStatuses[prevStatus] {
+				// Was tracked as live, now finished — normal transition.
+				if err := p.postStatusEvent(ctx, f, matchID, "MATCH_ENDED", f.Fixture.Status.Elapsed,
+					fmt.Sprintf("%d-MATCH_ENDED", fixtureID)); err != nil {
+					log.Printf("poller: schedule: post ended fixture %d: %v", fixtureID, err)
+					continue
+				}
+				_ = p.rdb.SetStatus(ctx, fixtureID, status)
+			}
 		}
 	}
 }
@@ -123,8 +239,12 @@ func (p *Poller) handleStatusTransition(ctx context.Context, fixture apifootball
 	fixtureID := fixture.Fixture.ID
 	elapsed := fixture.Fixture.Status.Elapsed
 
+	// "NS" and "TBD" are pre-match states written by the schedule poller;
+	// treat them the same as an empty (unseen) previous status.
+	noLiveHistory := prevStatus == "" || prevStatus == "NS" || prevStatus == "TBD"
+
 	switch {
-	case prevStatus == "":
+	case noLiveHistory:
 		switch currentStatus {
 		case "1H", "2H", "ET":
 			return p.postStatusEvent(ctx, fixture, matchID, "MATCH_STARTED", 0,
@@ -138,11 +258,11 @@ func (p *Poller) handleStatusTransition(ctx context.Context, fixture apifootball
 				fmt.Sprintf("%d-HALF_TIME", fixtureID))
 		}
 
-	case currentStatus == "HT":
+	case currentStatus == "HT" && !noLiveHistory:
 		return p.postStatusEvent(ctx, fixture, matchID, "HALF_TIME", 45,
 			fmt.Sprintf("%d-HALF_TIME", fixtureID))
 
-	case terminalStatuses[currentStatus] && !terminalStatuses[prevStatus]:
+	case terminalStatuses[currentStatus] && !terminalStatuses[prevStatus] && !noLiveHistory:
 		return p.postStatusEvent(ctx, fixture, matchID, "MATCH_ENDED", elapsed,
 			fmt.Sprintf("%d-MATCH_ENDED", fixtureID))
 	}
@@ -159,7 +279,7 @@ func (p *Poller) postStatusEvent(ctx context.Context, fixture apifootball.Fixtur
 		TeamALogo: fixture.Teams.Home.Logo,
 		TeamBLogo: fixture.Teams.Away.Logo,
 		Competition: competition{
-			Title: "world-cup-2026",
+			Title: p.competitionTitle(),
 			Stage: normalizeRound(fixture.League.Round),
 		},
 		Event:    eventType,
@@ -184,7 +304,7 @@ func (p *Poller) processGameEvent(ctx context.Context, fixture apifootball.Fixtu
 		TeamALogo: fixture.Teams.Home.Logo,
 		TeamBLogo: fixture.Teams.Away.Logo,
 		Competition: competition{
-			Title: "world-cup-2026",
+			Title: p.competitionTitle(),
 			Stage: normalizeRound(fixture.League.Round),
 		},
 		Event:    eventType,

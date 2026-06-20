@@ -27,13 +27,17 @@ type APICounter interface {
 
 type Client struct {
 	apiKey     string
+	leagueID   int
+	season     int
 	httpClient *http.Client
 	counter    APICounter
 }
 
-func NewClient(apiKey string, counter APICounter) *Client {
+func NewClient(apiKey string, leagueID int, season int, counter APICounter) *Client {
 	return &Client{
 		apiKey:     apiKey,
+		leagueID:   leagueID,
+		season:     season,
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		counter:    counter,
 	}
@@ -62,7 +66,12 @@ func (c *Client) checkLimit(ctx context.Context) error {
 	return nil
 }
 
+// ErrAPIRestricted is returned when the API returns a plan/access error.
+var ErrAPIRestricted = errors.New("API access restricted for plan/season")
+
 type FixtureResponse struct {
+	Errors   interface{}   `json:"errors"`
+	Results  int           `json:"results"`
 	Response []FixtureData `json:"response"`
 }
 
@@ -129,11 +138,28 @@ type PlayerInfo struct {
 	Name string `json:"name"`
 }
 
+// GetLiveFixtures returns all currently live fixtures for the configured league.
+// Note: the free API plan does not support filtering by season on this endpoint,
+// so we omit the season parameter intentionally.
 func (c *Client) GetLiveFixtures(ctx context.Context) ([]FixtureData, error) {
 	if err := c.checkLimit(ctx); err != nil {
 		return nil, err
 	}
-	url := fmt.Sprintf("%s/fixtures?live=all&league=1&season=2026", baseURL)
+	url := fmt.Sprintf("%s/fixtures?live=all&league=%d", baseURL, c.leagueID)
+	return c.fetchFixtures(ctx, url)
+}
+
+// GetFixturesByDate returns all fixtures for a given date (YYYY-MM-DD).
+// Requires a paid API plan that allows season-based queries.
+func (c *Client) GetFixturesByDate(ctx context.Context, date string) ([]FixtureData, error) {
+	if err := c.checkLimit(ctx); err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s/fixtures?league=%d&season=%d&date=%s", baseURL, c.leagueID, c.season, date)
+	return c.fetchFixtures(ctx, url)
+}
+
+func (c *Client) fetchFixtures(ctx context.Context, url string) ([]FixtureData, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -150,6 +176,20 @@ func (c *Client) GetLiveFixtures(ctx context.Context) ([]FixtureData, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
+
+	// Check for API-level errors (plan restrictions, invalid params, etc.)
+	if result.Errors != nil {
+		switch v := result.Errors.(type) {
+		case map[string]interface{}:
+			if len(v) > 0 {
+				for key, msg := range v {
+					log.Printf("apifootball: API error [%s]: %v", key, msg)
+				}
+				return nil, fmt.Errorf("%w: %v", ErrAPIRestricted, result.Errors)
+			}
+		}
+	}
+
 	return result.Response, nil
 }
 
@@ -176,3 +216,6 @@ func (c *Client) GetFixtureEvents(ctx context.Context, fixtureID int) ([]EventDa
 	}
 	return result.Response, nil
 }
+
+func (c *Client) LeagueID() int { return c.leagueID }
+func (c *Client) Season() int   { return c.season }

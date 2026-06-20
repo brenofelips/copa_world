@@ -79,7 +79,24 @@ func (c *Consumer) process(ctx context.Context, event *models.NormalizedEvent) e
 	state.LastEvent = string(event.EventType)
 	state.LastUpdated = time.Now().UTC()
 
+	// Always refresh logos when the event carries them.
+	if event.TeamALogo != "" {
+		state.TeamALogo = event.TeamALogo
+	}
+	if event.TeamBLogo != "" {
+		state.TeamBLogo = event.TeamBLogo
+	}
+
 	switch event.EventType {
+	case models.Scheduled:
+		state.Status = "SCHEDULED"
+		state.TeamACode = event.TeamACode
+		state.TeamBCode = event.TeamBCode
+		state.TeamA = event.TeamA
+		state.TeamB = event.TeamB
+		state.CompetitionTitle = event.CompetitionTitle
+		state.CompetitionStage = event.CompetitionStage
+
 	case models.MatchStarted:
 		state.Status = "LIVE"
 		state.ScoreA = 0
@@ -88,8 +105,6 @@ func (c *Consumer) process(ctx context.Context, event *models.NormalizedEvent) e
 		state.TeamBCode = event.TeamBCode
 		state.TeamA = event.TeamA
 		state.TeamB = event.TeamB
-		state.TeamALogo = event.TeamALogo
-		state.TeamBLogo = event.TeamBLogo
 
 	case models.Goal:
 		teamID, _ := event.Payload["team_id"].(string)
@@ -101,6 +116,13 @@ func (c *Consumer) process(ctx context.Context, event *models.NormalizedEvent) e
 
 	case models.MatchEnded:
 		state.Status = "ENDED"
+		// Use final score from payload for games missed entirely (from schedule poll).
+		if finalA, ok := event.Payload["final_score_a"].(float64); ok {
+			state.ScoreA = int(finalA)
+		}
+		if finalB, ok := event.Payload["final_score_b"].(float64); ok {
+			state.ScoreB = int(finalB)
+		}
 	}
 
 	if err := c.rdb.SetMatchState(ctx, state); err != nil {

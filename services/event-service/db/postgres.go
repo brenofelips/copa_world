@@ -62,6 +62,21 @@ func (s *Store) SaveEvent(ctx context.Context, event *models.NormalizedEvent) er
 
 func (s *Store) upsertMatch(ctx context.Context, event *models.NormalizedEvent) error {
 	switch event.EventType {
+	case models.Scheduled:
+		_, err := s.pool.Exec(ctx, `
+			INSERT INTO matches
+				(id, team_a_id, team_a_name, team_b_id, team_b_name, competition_title, competition_stage, status)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'SCHEDULED')
+			ON CONFLICT (id) DO NOTHING
+		`,
+			event.MatchID,
+			event.TeamACode, event.TeamA,
+			event.TeamBCode, event.TeamB,
+			event.CompetitionTitle,
+			event.CompetitionStage,
+		)
+		return err
+
 	case models.MatchStarted:
 		_, err := s.pool.Exec(ctx, `
 			INSERT INTO matches

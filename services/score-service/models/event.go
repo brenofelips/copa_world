@@ -5,6 +5,7 @@ import "time"
 type EventType string
 
 const (
+	Scheduled    EventType = "SCHEDULED"
 	MatchStarted EventType = "MATCH_STARTED"
 	Goal         EventType = "GOAL"
 	RedCard      EventType = "RED_CARD"
