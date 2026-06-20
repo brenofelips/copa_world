@@ -204,6 +204,10 @@ services:
       API_FOOTBALL_KEY: ${API_FOOTBALL_KEY}
       INGESTION_URL: http://nginx/events
       REDIS_ADDR: redis:6379
+      POLL_INTERVAL: ${POLL_INTERVAL:-30s}
+      SCHEDULE_INTERVAL: ${SCHEDULE_INTERVAL:-1h}
+      LEAGUE_ID: ${LEAGUE_ID:-1}
+      SEASON: ${SEASON:-2026}
     depends_on:
       redis:
         condition: service_healthy
