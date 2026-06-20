@@ -1,0 +1,33 @@
+# ── Sensitive files ───────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pdf
+
+# ── Go ────────────────────────────────────────────────────────────────────────
+bin/
+dist/
+*/bin/
+services/*/bin/
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# ── Docker volumes / local data ───────────────────────────────────────────────
+postgres/data/
+redis/data/
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo

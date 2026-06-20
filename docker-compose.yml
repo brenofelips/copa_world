@@ -1,0 +1,214 @@
+version: '3.8'
+
+services:
+  # ─── Infrastructure ───────────────────────────────────────────────────────────
+
+  kafka:
+    image: bitnami/kafka:3.7
+    hostname: kafka
+    environment:
+      - KAFKA_CFG_NODE_ID=1
+      - KAFKA_CFG_PROCESS_ROLES=broker,controller
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    volumes:
+      - kafka_data:/bitnami/kafka
+    healthcheck:
+      test: kafka-topics.sh --list --bootstrap-server localhost:9092 || exit 1
+      start_period: 20s
+      interval: 5s
+      timeout: 10s
+      retries: 20
+    ports:
+      - "9092:9092"
+
+  kafka-init:
+    image: bitnami/kafka:3.7
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      kafka-topics.sh --create
+        --if-not-exists
+        --bootstrap-server kafka:9092
+        --partitions 2
+        --replication-factor 1
+        --topic match-events
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: redis-cli ping
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: copaworld
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: pg_isready -U postgres -d copaworld
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  postgres-replica-1:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: copaworld
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      PGUSER: postgres
+    volumes:
+      - postgres_replica1_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: pg_isready -U postgres -d copaworld
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ─── Load Balancer (Ingestion API) ────────────────────────────────────────────
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - ingestion-api-1
+      - ingestion-api-2
+
+  # ─── Ingestion API (2 instances behind Nginx) ─────────────────────────────────
+
+  ingestion-api-1:
+    build: ./services/ingestion-api
+    environment:
+      PORT: 8081
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+
+  ingestion-api-2:
+    build: ./services/ingestion-api
+    environment:
+      PORT: 8081
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+
+  # ─── Score Service (Kafka → Redis) ────────────────────────────────────────────
+
+  score-service-1:
+    build: ./services/score-service
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      REDIS_ADDR: redis:6379
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  score-service-2:
+    build: ./services/score-service
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      REDIS_ADDR: redis:6379
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  # ─── Event Service (Kafka → PostgreSQL) ───────────────────────────────────────
+
+  event-service-1:
+    build: ./services/event-service
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/copaworld?sslmode=disable
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  event-service-2:
+    build: ./services/event-service
+    environment:
+      KAFKA_BROKERS: kafka:9092
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/copaworld?sslmode=disable
+    depends_on:
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+
+  # ─── Web Server (REST + SSE) ───────────────────────────────────────────────────
+
+  web-server:
+    build: ./services/web-server
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: 8080
+      REDIS_ADDR: redis:6379
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/copaworld?sslmode=disable
+      DATABASE_REPLICA_URL: postgres://postgres:postgres@postgres-replica-1:5432/copaworld?sslmode=disable
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # ─── Frontend (Next.js) ────────────────────────────────────────────────────────
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_WEB_SERVER_URL: http://localhost:8080
+    depends_on:
+      - web-server
+
+volumes:
+  kafka_data:
+  redis_data:
+  postgres_data:
+  postgres_replica1_data:
