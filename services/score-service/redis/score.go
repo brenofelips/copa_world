@@ -9,7 +9,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const matchKeyTTL = 24 * time.Hour
+const (
+	liveMatchTTL      = 24 * time.Hour
+	endedMatchTTL     = 30 * 24 * time.Hour
+	scheduledMatchTTL = 14 * 24 * time.Hour
+)
 
 type Client struct {
 	rdb *redis.Client
@@ -64,7 +68,14 @@ func (c *Client) SetMatchState(ctx context.Context, state *MatchState) error {
 	if err != nil {
 		return fmt.Errorf("marshal match state: %w", err)
 	}
-	return c.rdb.Set(ctx, key, data, matchKeyTTL).Err()
+	ttl := liveMatchTTL
+	switch state.Status {
+	case "ENDED":
+		ttl = endedMatchTTL
+	case "SCHEDULED":
+		ttl = scheduledMatchTTL
+	}
+	return c.rdb.Set(ctx, key, data, ttl).Err()
 }
 
 // PublishEvent broadcasts the updated match state to all SSE subscribers.

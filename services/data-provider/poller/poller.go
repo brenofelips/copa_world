@@ -72,21 +72,32 @@ func (p *Poller) Run(ctx context.Context) {
 	}
 }
 
-// pollSchedule fetches all of today's fixtures and sends SCHEDULED events for
-// upcoming games and MATCH_ENDED (with final score) for games we missed entirely.
-// Requires a paid API plan; on free plans it logs a warning and returns early.
+// pollSchedule fetches ALL fixtures for the season and sends SCHEDULED events for
+// upcoming games and MATCH_ENDED (with final score) for games already finished.
+// Falls back to today-only if the full-season endpoint is restricted by the API plan.
 func (p *Poller) pollSchedule(ctx context.Context) {
-	today := time.Now().UTC().Format("2006-01-02")
-	fixtures, err := p.api.GetFixturesByDate(ctx, today)
+	fixtures, err := p.api.GetAllFixtures(ctx)
 	if err != nil {
 		if errors.Is(err, apifootball.ErrAPIRestricted) {
-			log.Printf("poller: schedule poll skipped — upgrade API plan to enable schedule fetching (live polling still active)")
+			// Fallback: fetch only today when full-season query is restricted.
+			today := time.Now().UTC().Format("2006-01-02")
+			fixtures, err = p.api.GetFixturesByDate(ctx, today)
+			if err != nil {
+				if errors.Is(err, apifootball.ErrAPIRestricted) {
+					log.Printf("poller: schedule poll skipped — API plan does not allow schedule fetching (live polling still active)")
+					return
+				}
+				log.Printf("poller: fetch schedule error: %v", err)
+				return
+			}
+			log.Printf("poller: %d fixture(s) in today's schedule (fallback)", len(fixtures))
+		} else {
+			log.Printf("poller: fetch schedule error: %v", err)
 			return
 		}
-		log.Printf("poller: fetch schedule error: %v", err)
-		return
+	} else {
+		log.Printf("poller: %d fixture(s) in full season schedule", len(fixtures))
 	}
-	log.Printf("poller: %d fixture(s) in today's schedule", len(fixtures))
 
 	for _, f := range fixtures {
 		status := f.Fixture.Status.Short
@@ -177,10 +188,23 @@ func (p *Poller) poll(ctx context.Context) {
 	}
 	log.Printf("poller: %d live fixture(s)", len(fixtures))
 	for _, f := range fixtures {
+		// Free plan returns live=all without season filter; skip non-target season fixtures.
+		if !p.isCurrentSeason(f) {
+			log.Printf("poller: skipping fixture %d (season mismatch)", f.Fixture.ID)
+			continue
+		}
 		if err := p.processFixture(ctx, f); err != nil {
 			log.Printf("poller: fixture %d error: %v", f.Fixture.ID, err)
 		}
 	}
+}
+
+func (p *Poller) isCurrentSeason(f apifootball.FixtureData) bool {
+	t, err := time.Parse(time.RFC3339, f.Fixture.Date)
+	if err != nil {
+		return true
+	}
+	return t.UTC().Year() == p.season
 }
 
 func (p *Poller) processFixture(ctx context.Context, fixture apifootball.FixtureData) error {

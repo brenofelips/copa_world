@@ -57,6 +57,9 @@ func (c *Client) GetLiveMatches(ctx context.Context) ([]*models.MatchState, erro
 		if err := json.Unmarshal(data, &state); err != nil {
 			continue
 		}
+		if state.Status == "SCHEDULED" {
+			continue
+		}
 		matches = append(matches, &state)
 	}
 	return matches, nil

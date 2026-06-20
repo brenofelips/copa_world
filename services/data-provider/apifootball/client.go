@@ -150,12 +150,21 @@ func (c *Client) GetLiveFixtures(ctx context.Context) ([]FixtureData, error) {
 }
 
 // GetFixturesByDate returns all fixtures for a given date (YYYY-MM-DD).
-// Requires a paid API plan that allows season-based queries.
 func (c *Client) GetFixturesByDate(ctx context.Context, date string) ([]FixtureData, error) {
 	if err := c.checkLimit(ctx); err != nil {
 		return nil, err
 	}
 	url := fmt.Sprintf("%s/fixtures?league=%d&season=%d&date=%s", baseURL, c.leagueID, c.season, date)
+	return c.fetchFixtures(ctx, url)
+}
+
+// GetAllFixtures returns all fixtures for the configured league and season.
+// Use this to get the full tournament schedule: past, live, and upcoming games.
+func (c *Client) GetAllFixtures(ctx context.Context) ([]FixtureData, error) {
+	if err := c.checkLimit(ctx); err != nil {
+		return nil, err
+	}
+	url := fmt.Sprintf("%s/fixtures?league=%d&season=%d", baseURL, c.leagueID, c.season)
 	return c.fetchFixtures(ctx, url)
 }
 

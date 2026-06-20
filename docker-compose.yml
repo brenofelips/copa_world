@@ -1,22 +1,23 @@
-version: '3.8'
-
 services:
   # ─── Infrastructure ───────────────────────────────────────────────────────────
 
   kafka:
-    image: apache/kafka:3.7.0
+    image: ${KAFKA_IMAGE}
     hostname: kafka
     environment:
-      - KAFKA_NODE_ID=1
-      - KAFKA_PROCESS_ROLES=broker,controller
-      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
-      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
-      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
-      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
-      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
-      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=false
-      - CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: ${KAFKA_NODE_ID}
+      KAFKA_PROCESS_ROLES: ${KAFKA_PROCESS_ROLES}
+      KAFKA_CONTROLLER_QUORUM_VOTERS: ${KAFKA_CONTROLLER_QUORUM_VOTERS}
+      KAFKA_LISTENERS: ${KAFKA_LISTENERS}
+      KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: ${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP}
+      KAFKA_CONTROLLER_LISTENER_NAMES: ${KAFKA_CONTROLLER_LISTENER_NAMES}
+      KAFKA_INTER_BROKER_LISTENER_NAME: ${KAFKA_INTER_BROKER_LISTENER_NAME}
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: ${KAFKA_AUTO_CREATE_TOPICS_ENABLE}
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: ${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: ${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR}
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: ${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR}
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
     volumes:
       - kafka_data:/var/lib/kafka/data
     healthcheck:
@@ -26,23 +27,23 @@ services:
       timeout: 10s
       retries: 20
     ports:
-      - "9092:9092"
+      - "${KAFKA_HOST_PORT}:9092"
 
   kafka-init:
-    image: apache/kafka:3.7.0
+    image: ${KAFKA_IMAGE}
     depends_on:
       kafka:
         condition: service_healthy
     command: >
       /opt/kafka/bin/kafka-topics.sh --create
         --if-not-exists
-        --bootstrap-server kafka:9092
-        --partitions 2
-        --replication-factor 1
-        --topic match-events
+        --bootstrap-server ${KAFKA_BROKERS}
+        --partitions ${KAFKA_TOPIC_PARTITIONS}
+        --replication-factor ${KAFKA_TOPIC_REPLICATION_FACTOR}
+        --topic ${KAFKA_TOPIC}
 
   redis:
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE}
     command: redis-server --save 60 1 --loglevel warning
     volumes:
       - redis_data:/data
@@ -52,37 +53,37 @@ services:
       timeout: 5s
       retries: 10
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT}:6379"
 
   postgres:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE}
     environment:
-      POSTGRES_DB: copaworld
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: pg_isready -U postgres -d copaworld
+      test: pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
       interval: 5s
       timeout: 5s
       retries: 10
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT}:5432"
 
   postgres-replica-1:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE}
     environment:
-      POSTGRES_DB: copaworld
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      PGUSER: postgres
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGUSER: ${POSTGRES_USER}
     volumes:
       - postgres_replica1_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: pg_isready -U postgres -d copaworld
+      test: pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}
       interval: 5s
       timeout: 5s
       retries: 10
@@ -90,9 +91,9 @@ services:
   # ─── Load Balancer (Ingestion API) ────────────────────────────────────────────
 
   nginx:
-    image: nginx:alpine
+    image: ${NGINX_IMAGE}
     ports:
-      - "80:80"
+      - "${NGINX_HOST_PORT}:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
@@ -104,8 +105,8 @@ services:
   ingestion-api-1:
     build: ./services/ingestion-api
     environment:
-      PORT: 8081
-      KAFKA_BROKERS: kafka:9092
+      PORT: ${INGESTION_API_PORT}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
     depends_on:
       kafka:
         condition: service_healthy
@@ -115,8 +116,8 @@ services:
   ingestion-api-2:
     build: ./services/ingestion-api
     environment:
-      PORT: 8081
-      KAFKA_BROKERS: kafka:9092
+      PORT: ${INGESTION_API_PORT}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
     depends_on:
       kafka:
         condition: service_healthy
@@ -128,8 +129,8 @@ services:
   score-service-1:
     build: ./services/score-service
     environment:
-      KAFKA_BROKERS: kafka:9092
-      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_ADDR: ${REDIS_ADDR}
     depends_on:
       kafka:
         condition: service_healthy
@@ -141,8 +142,8 @@ services:
   score-service-2:
     build: ./services/score-service
     environment:
-      KAFKA_BROKERS: kafka:9092
-      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_ADDR: ${REDIS_ADDR}
     depends_on:
       kafka:
         condition: service_healthy
@@ -156,8 +157,8 @@ services:
   event-service-1:
     build: ./services/event-service
     environment:
-      KAFKA_BROKERS: kafka:9092
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/copaworld?sslmode=disable
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      DATABASE_URL: ${DATABASE_URL}
     depends_on:
       kafka:
         condition: service_healthy
@@ -169,8 +170,8 @@ services:
   event-service-2:
     build: ./services/event-service
     environment:
-      KAFKA_BROKERS: kafka:9092
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/copaworld?sslmode=disable
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      DATABASE_URL: ${DATABASE_URL}
     depends_on:
       kafka:
         condition: service_healthy
@@ -184,12 +185,12 @@ services:
   web-server:
     build: ./services/web-server
     ports:
-      - "8080:8080"
+      - "${WEB_SERVER_HOST_PORT}:${WEB_SERVER_PORT}"
     environment:
-      PORT: 8080
-      REDIS_ADDR: redis:6379
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/copaworld?sslmode=disable
-      DATABASE_REPLICA_URL: postgres://postgres:postgres@postgres-replica-1:5432/copaworld?sslmode=disable
+      PORT: ${WEB_SERVER_PORT}
+      REDIS_ADDR: ${REDIS_ADDR}
+      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_REPLICA_URL: ${DATABASE_REPLICA_URL}
     depends_on:
       redis:
         condition: service_healthy
@@ -202,12 +203,12 @@ services:
     build: ./services/data-provider
     environment:
       API_FOOTBALL_KEY: ${API_FOOTBALL_KEY}
-      INGESTION_URL: http://nginx/events
-      REDIS_ADDR: redis:6379
-      POLL_INTERVAL: ${POLL_INTERVAL:-30s}
-      SCHEDULE_INTERVAL: ${SCHEDULE_INTERVAL:-1h}
-      LEAGUE_ID: ${LEAGUE_ID:-1}
-      SEASON: ${SEASON:-2026}
+      INGESTION_URL: ${INGESTION_URL}
+      REDIS_ADDR: ${REDIS_ADDR}
+      POLL_INTERVAL: ${POLL_INTERVAL}
+      SCHEDULE_INTERVAL: ${SCHEDULE_INTERVAL}
+      LEAGUE_ID: ${LEAGUE_ID}
+      SEASON: ${SEASON}
     depends_on:
       redis:
         condition: service_healthy
@@ -219,9 +220,9 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_HOST_PORT}:3000"
     environment:
-      NEXT_PUBLIC_WEB_SERVER_URL: http://localhost:8080
+      NEXT_PUBLIC_WEB_SERVER_URL: ${NEXT_PUBLIC_WEB_SERVER_URL}
     depends_on:
       - web-server
 
